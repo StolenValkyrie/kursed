@@ -16,6 +16,8 @@ const {
   TextDisplayBuilder,
   SeparatorBuilder,
   SeparatorSpacingSize,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   REST,
   Routes,
 } = require('discord.js');
@@ -46,6 +48,12 @@ const docksys = require('./utils/docksys');
 function buildV2({ heading, body, fields = [], footer, color = config.BRAND_COLOR, rows = [] } = {}) {
   const container = new ContainerBuilder().setAccentColor(color);
 
+  container.addMediaGalleryComponents(
+    new MediaGalleryBuilder().addItems(
+      new MediaGalleryItemBuilder().setURL(config.CONTAINER_TOP_IMAGE)
+    )
+  );
+
   if (heading) {
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`### ${heading}`));
   }
@@ -68,6 +76,12 @@ function buildV2({ heading, body, fields = [], footer, color = config.BRAND_COLO
   for (const row of rows) {
     container.addActionRowComponents(row);
   }
+
+  container.addMediaGalleryComponents(
+    new MediaGalleryBuilder().addItems(
+      new MediaGalleryItemBuilder().setURL(config.CONTAINER_BOTTOM_IMAGE)
+    )
+  );
 
   return {
     components: [container],
@@ -185,7 +199,6 @@ client.once('ready', async () => {
 // Interactions: slash commands, verify button, ticket buttons
 // ---------------------------------------------------------------------------
 client.on('interactionCreate', async (interaction) => {
-    if (interaction.guild && interaction.guild.id !== config.ALLOWED_GUILD_ID) return;
   if (interaction.isChatInputCommand()) {
     const command = client.commands.get(interaction.commandName);
     if (!command) return;
@@ -333,7 +346,6 @@ async function handleTicketClose(interaction) {
 // ---------------------------------------------------------------------------
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
-  if (message.guild.id !== config.ALLOWED_GUILD_ID) return;
 
   // Honeypot: anyone posting in the trap channel gets quarantined immediately.
   const honeypot = storage.read('honeypot', {});
