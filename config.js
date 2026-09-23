@@ -2,7 +2,7 @@ module.exports = {
   PREFIX: '`',
 
   // Role required to use every command except /status
-  REQUIRED_ROLE_ID: '1551524227063226390',
+  REQUIRED_ROLE_ID: '1509866862383599768',
 
   // Only these user IDs may use the status command
   STATUS_ALLOWED_USERS: ['1537386768121462815', '1347447934597464089'],
