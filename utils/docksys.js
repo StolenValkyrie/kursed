@@ -1,10 +1,9 @@
-const { DOCKSYS_API_BASE } = require('../config');
+const { DOCKSYS_API_BASE, DOCKSYS_PID } = require('../config');
 
 /**
- * NOTE: Docksys's exact request/response shape isn't something I could
- * confirm from public docs, so this wrapper uses common REST conventions.
- * Check https://docksys.xyz (or whatever API reference they gave you) and
- * adjust the endpoint paths / field names below if they differ.
+ * Wrapper around the real Dock API - see https://docs.docksys.xyz/api/introduction.
+ * Auth is `Authorization: Bearer <DOCKSYS_API_KEY>`, confirmed against Dock's
+ * published docs (not guessed).
  */
 
 async function docksysRequest(pathname, options = {}) {
@@ -19,34 +18,59 @@ async function docksysRequest(pathname, options = {}) {
     ...options,
   });
 
+  const body = await res.json().catch(() => null);
+
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Docksys API error ${res.status}: ${text || res.statusText}`);
+    const err = new Error(body?.error || `Docksys API error ${res.status}`);
+    err.status = res.status;
+    err.body = body;
+    throw err;
   }
 
-  return res.json();
+  return body;
 }
 
-/** Look up a Roblox account by username. */
-async function getRobloxByUsername(username) {
-  return docksysRequest(`/roblox/users/${encodeURIComponent(username)}`);
-}
-
-/** Look up whatever Roblox account is already linked to a Discord ID, if any. */
-async function getLinkByDiscordId(discordId) {
+/**
+ * Looks up whatever Roblox ID is already linked to a Discord ID in a given
+ * guild. Returns the Roblox ID string, or null if there's no link (Dock
+ * returns 404) or the bot/key isn't authorized for that guild (403).
+ * Anything else (401, 429, 500) throws.
+ */
+async function getLinkByDiscordId(discordId, guildId) {
   try {
-    return await docksysRequest(`/discord/${discordId}`);
-  } catch {
-    return null;
+    const res = await docksysRequest(
+      `/api/v1/public/discord-to-roblox?discordId=${encodeURIComponent(discordId)}&guildId=${encodeURIComponent(guildId)}`
+    );
+    return res?.data?.robloxId || null;
+  } catch (err) {
+    if (err.status === 404 || err.status === 403) return null;
+    throw err;
   }
 }
 
-/** Persist a verified Discord <-> Roblox link on Docksys's side. */
-async function createLink(discordId, robloxId) {
-  return docksysRequest('/verify', {
+/**
+ * Starts a Dock verification session for a Discord user. Returns Dock's
+ * session data: { sid, pid, clientId, expiresAt, reusedExisting, verifyUrl }.
+ * Send the user to verifyUrl, then poll getVerificationSessionStatus(sid).
+ */
+async function createVerificationSession(discordId, guildId) {
+  const res = await docksysRequest('/api/v1/verify/session', {
     method: 'POST',
-    body: JSON.stringify({ discordId, robloxId }),
+    body: JSON.stringify({ pid: DOCKSYS_PID, clientId: discordId, guildId }),
   });
+  return res.data;
 }
 
-module.exports = { getRobloxByUsername, getLinkByDiscordId, createLink };
+/**
+ * Checks (or long-polls, via `wait` seconds, capped at 25) a verification
+ * session. Returns Dock's raw `data` object - either
+ * { status: 'pending' | 'expired' | 'cancelled', result: null } or
+ * { result: { discordId, robloxId, ... } } once the user completes it.
+ */
+async function getVerificationSessionStatus(sid, wait) {
+  const query = wait ? `?wait=${Math.min(25, Math.max(1, wait))}` : '';
+  const res = await docksysRequest(`/api/v1/verify/session/${encodeURIComponent(sid)}${query}`);
+  return res.data;
+}
+
+module.exports = { getLinkByDiscordId, createVerificationSession, getVerificationSessionStatus };

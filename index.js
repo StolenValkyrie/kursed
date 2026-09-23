@@ -208,11 +208,15 @@ client.on('interactionCreate', async (interaction) => {
 
   if (interaction.isButton()) {
     if (interaction.customId === 'kursed_verify_btn') return handleVerifyButton(interaction);
+    if (interaction.customId.startsWith('kursed_verify_check:')) return handleVerifyCheck(interaction);
     if (interaction.customId === 'kursed_ticket_open') return handleTicketOpen(interaction);
     if (interaction.customId === 'kursed_ticket_close') return handleTicketClose(interaction);
   }
 });
 
+// Step 1: if they're already linked on Dock, grant the role immediately.
+// Otherwise start a Dock verification session and hand them the link plus a
+// button to check back once they've completed it on Dock's site.
 async function handleVerifyButton(interaction) {
   const verification = storage.read('verification', {});
   const config_ = verification[interaction.guild.id];
@@ -223,25 +227,87 @@ async function handleVerifyButton(interaction) {
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  let link;
+  const role = interaction.guild.roles.cache.get(config_.roleId);
+  if (!role) {
+    return interaction.editReply(errorV2('The configured verified role no longer exists - ask staff to run `verification-setup` again.'));
+  }
+
+  let robloxId;
   try {
-    link = await docksys.getLinkByDiscordId(interaction.user.id);
+    robloxId = await docksys.getLinkByDiscordId(interaction.user.id, interaction.guild.id);
   } catch (err) {
     console.error('[verify] docksys lookup failed:', err);
     return interaction.editReply(errorV2('Could not reach Docksys right now. Try again shortly.'));
   }
 
-  if (!link) {
-    return interaction.editReply(
-      errorV2(`No linked Roblox account found. Link your account at **${config.DOCKSYS_SITE}**, then click Verify again.`)
-    );
+  if (robloxId) {
+    return grantVerifiedRole(interaction, role, robloxId);
   }
+
+  let session;
+  try {
+    session = await docksys.createVerificationSession(interaction.user.id, interaction.guild.id);
+  } catch (err) {
+    console.error('[verify] failed to create verification session:', err);
+    return interaction.editReply(errorV2('Could not start verification right now. Try again shortly.'));
+  }
+
+  const linkRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setLabel('Verify with Roblox').setStyle(ButtonStyle.Link).setURL(session.verifyUrl)
+  );
+  const checkRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`kursed_verify_check:${session.sid}`)
+      .setLabel("I've verified")
+      .setStyle(ButtonStyle.Success)
+  );
+
+  return interaction.editReply(
+    buildV2({
+      heading: 'Roblox Verification',
+      body: "Click below to verify with Roblox, then come back and press **\"I've verified\"**.",
+      rows: [linkRow, checkRow],
+    })
+  );
+}
+
+// Step 2: they come back and click "I've verified" - poll the session.
+async function handleVerifyCheck(interaction) {
+  const sid = interaction.customId.split(':')[1];
+  const verification = storage.read('verification', {});
+  const config_ = verification[interaction.guild.id];
+
+  if (!config_) {
+    return interaction.reply(ephemeral(errorV2('Verification is not set up on this server yet.')));
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const role = interaction.guild.roles.cache.get(config_.roleId);
   if (!role) {
     return interaction.editReply(errorV2('The configured verified role no longer exists - ask staff to run `verification-setup` again.'));
   }
 
+  let session;
+  try {
+    // Long-poll for up to 20s in case they just finished on Dock's page.
+    session = await docksys.getVerificationSessionStatus(sid, 20);
+  } catch (err) {
+    console.error('[verify] failed to check verification session:', err);
+    return interaction.editReply(errorV2('Could not check verification status right now. Try again shortly.'));
+  }
+
+  if (!session?.result?.robloxId) {
+    if (session?.status === 'expired' || session?.status === 'cancelled') {
+      return interaction.editReply(errorV2('That verification link expired - click **Verify with Roblox** again to get a new one.'));
+    }
+    return interaction.editReply(errorV2("Still waiting on that - finish the steps on Dock's page, then click **I've verified** again."));
+  }
+
+  return grantVerifiedRole(interaction, role, session.result.robloxId);
+}
+
+async function grantVerifiedRole(interaction, role, robloxId) {
   try {
     const member = await interaction.guild.members.fetch(interaction.user.id);
     if (!member.roles.cache.has(role.id)) {
@@ -252,11 +318,10 @@ async function handleVerifyButton(interaction) {
     return interaction.editReply(errorV2("Verified, but I couldn't assign your role - check my permissions."));
   }
 
-  const robloxLabel = link.robloxUsername || link.username || link.robloxId || 'your Roblox account';
   return interaction.editReply(
     buildV2({
       heading: 'Verified ✅',
-      body: `You're now verified as **${robloxLabel}** and have been given **${role.name}**.`,
+      body: `You're now verified (Roblox ID **${robloxId}**) and have been given **${role.name}**.`,
     })
   );
 }
