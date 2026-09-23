@@ -22,8 +22,19 @@ module.exports = {
   async execute(ctx) {
     const channel = ctx.getChannel('channel', 0) || ctx.channel;
 
-    if (!ctx.guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels)) {
-      return ctx.reply(ctx.client.errorV2("I don't have permission to manage channels (needed to create tickets)."));
+    if (!channel.isTextBased()) {
+      return ctx.reply(ctx.client.errorV2('Please pick a text channel for the ticket panel.'));
+    }
+
+    // Ticket creation later needs ManageRoles too (permissionOverwrites on the
+    // new channel), so check both up front instead of failing at ticket-open time.
+    if (
+      !ctx.guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels) ||
+      !ctx.guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)
+    ) {
+      return ctx.reply(
+        ctx.client.errorV2("I need both Manage Channels and Manage Roles to create and lock down ticket channels.")
+      );
     }
 
     // Acknowledge now - posting the panel (two external images) can take
@@ -42,13 +53,17 @@ module.exports = {
         .setEmoji('🎫')
     );
 
-    await channel.send(
-      ctx.client.buildV2({
-        heading: 'Support Tickets',
-        body: 'Need help? Click below to open a private ticket with the staff team.',
-        rows: [row],
-      })
-    );
+    try {
+      await channel.send(
+        ctx.client.buildV2({
+          heading: 'Support Tickets',
+          body: 'Need help? Click below to open a private ticket with the staff team.',
+          rows: [row],
+        })
+      );
+    } catch (err) {
+      return ctx.reply(ctx.client.errorV2(`Couldn't post the panel in ${channel} - check my permissions there.`));
+    }
 
     return ctx.reply(ctx.client.successV2(`Ticket panel posted in ${channel}.`));
   },

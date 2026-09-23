@@ -141,8 +141,7 @@ async function canRun(command, ctx) {
   if (command.ownerOnly) {
     return isStatusAllowed(ctx.user.id);
   }
-  return true; // TEMP: bypass role check for debugging - revert this after
-  // return hasRequiredRole(ctx.member);
+  return hasRequiredRole(ctx.member);
 }
 
 async function runCommand(command, ctx) {

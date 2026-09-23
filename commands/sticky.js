@@ -26,6 +26,10 @@ module.exports = {
       return ctx.reply(ctx.client.errorV2('Usage: `sticky <#channel> <message | off>`'));
     }
 
+    if (!channel.isTextBased()) {
+      return ctx.reply(ctx.client.errorV2('Please pick a text channel for the sticky message.'));
+    }
+
     if (!ctx.guild.members.me.permissions.has(PermissionFlagsBits.ManageMessages)) {
       return ctx.reply(ctx.client.errorV2("I don't have permission to manage messages in that channel."));
     }
@@ -45,7 +49,12 @@ module.exports = {
       return ctx.reply(ctx.client.successV2(`Sticky removed from ${channel}.`));
     }
 
-    const sent = await channel.send(ctx.client.buildV2({ body: text, footer: 'Sticky message' }));
+    let sent;
+    try {
+      sent = await channel.send(ctx.client.buildV2({ body: text, footer: 'Sticky message' }));
+    } catch (err) {
+      return ctx.reply(ctx.client.errorV2(`Couldn't post in ${channel} - check my permissions there.`));
+    }
 
     guildStickies[channel.id] = { text, lastMessageId: sent.id };
     sticky[ctx.guild.id] = guildStickies;

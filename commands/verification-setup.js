@@ -30,8 +30,18 @@ module.exports = {
       return ctx.reply(ctx.client.errorV2('Usage: `verification-setup <@role> [#channel]`'));
     }
 
+    if (!channel.isTextBased()) {
+      return ctx.reply(ctx.client.errorV2('Please pick a text channel for the verification panel.'));
+    }
+
     if (!ctx.guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) {
       return ctx.reply(ctx.client.errorV2("I don't have permission to manage roles."));
+    }
+
+    // Catch a misconfigured role now, rather than every future click of the
+    // Verify button silently failing to assign it.
+    if (role.position >= ctx.guild.members.me.roles.highest.position) {
+      return ctx.reply(ctx.client.errorV2(`I can't assign **${role.name}** - it's above my highest role.`));
     }
 
     // Acknowledge now - posting the panel (two external images) can take
@@ -50,13 +60,17 @@ module.exports = {
         .setEmoji('✅')
     );
 
-    await channel.send(
-      ctx.client.buildV2({
-        heading: 'Roblox Verification',
-        body: `Click the button below to verify your Roblox account through Docksys.\n\nHaven't linked your account yet? Head to **${DOCKSYS_SITE}** first, then come back and click Verify.`,
-        rows: [row],
-      })
-    );
+    try {
+      await channel.send(
+        ctx.client.buildV2({
+          heading: 'Roblox Verification',
+          body: `Click the button below to verify your Roblox account through Docksys.\n\nHaven't linked your account yet? Head to **${DOCKSYS_SITE}** first, then come back and click Verify.`,
+          rows: [row],
+        })
+      );
+    } catch (err) {
+      return ctx.reply(ctx.client.errorV2(`Couldn't post the panel in ${channel} - check my permissions there.`));
+    }
 
     return ctx.reply(ctx.client.successV2(`Verification panel posted in ${channel}, granting **${role.name}**.`));
   },
