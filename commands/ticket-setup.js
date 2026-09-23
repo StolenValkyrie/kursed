@@ -26,6 +26,10 @@ module.exports = {
       return ctx.reply(ctx.client.errorV2("I don't have permission to manage channels (needed to create tickets)."));
     }
 
+    // Acknowledge now - posting the panel (two external images) can take
+    // longer than Discord's 3s window, and we don't want a silent timeout.
+    await ctx.defer();
+
     const tickets = storage.read('tickets', {});
     tickets[ctx.guild.id] = { ...(tickets[ctx.guild.id] || {}), staffRoleId: REQUIRED_ROLE_ID, open: tickets[ctx.guild.id]?.open || {} };
     storage.write('tickets', tickets);

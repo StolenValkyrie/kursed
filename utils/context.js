@@ -12,13 +12,26 @@ function fromInteraction(interaction) {
     channel: interaction.channel,
     member: interaction.member,
     user: interaction.user,
-    args: [],
+    args: [], // slash commands read via getters below, not raw args
 
     async reply(payload) {
       if (interaction.deferred || interaction.replied) {
         return interaction.editReply(payload);
       }
       return interaction.reply(payload);
+    },
+
+    /**
+     * Acknowledge the interaction immediately, before doing anything slow
+     * (creating channels, posting messages with attachments, etc). Discord
+     * only gives you ~3 seconds to respond, so any command that does real
+     * work before replying should call this first - ctx.reply() will
+     * automatically edit the deferred reply instead of sending a new one.
+     */
+    async defer(ephemeralReply = false) {
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply(ephemeralReply ? { flags: 64 } : {});
+      }
     },
 
     getString(name) {
@@ -70,6 +83,9 @@ function fromMessage(message, args) {
     async reply(payload) {
       return message.reply(payload);
     },
+
+    /** No-op for prefix messages - there's no ack-time limit to beat. */
+    async defer() {},
 
     getString(_name, index = 0) {
       return args[index] ?? null;
